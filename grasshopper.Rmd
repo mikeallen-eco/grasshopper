@@ -4,7 +4,7 @@ https://gis.stackexchange.com/questions/227585/using-r-to-extract-data-from-worl
 library(raster)
 library(sp)
 
-r <- getData("worldclim",var="bio",res=10)
+r <- getData("worldclim",var="bio",res=5)
 
 r <- r[[c(1,12)]]
 names(r) <- c("Temp","Prec")
