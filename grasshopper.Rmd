@@ -13,9 +13,9 @@ library(tidyr)
 library(forcats)
 library(ggplot2)
 library(geodata)
+sin = "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +R=6371007.181 +units=m +no_defs"
 
 # grasshopper
-
 data_sources <- read.csv("data/datasets_download_usage_0118912-230530130749713.tsv", sep = "\t")
 g <- read.csv("data/0118912-230530130749713.csv", sep = "\t") %>%
   rename(lat = decimalLatitude, lon = decimalLongitude) %>%
@@ -24,32 +24,184 @@ g <- read.csv("data/0118912-230530130749713.csv", sep = "\t") %>%
   filter(dup == FALSE) %>% 
   dplyr::select(-dupcheck, -dup)
 
-# worldclim
-r <- geodata::worldclim_global(var = "bio", res = 5, path = "data/")
+# load CONUS
+us <- rnaturalearth::ne_states(country = "United States of America", returnclass = "sf") %>%
+  filter(!name %in% c("Alaska", "Hawaii"))
 
+# test plot CONUS region
+plot(us[,"name"])
+
+# wc <- geodata::worldclim_global(var = "bio", res = 5, download=F, path="/Users/mikea/Documents/mikedata/grasshopper/202407/")
+# 
+# # Clip the raster stack
+# vect_sf <- vect(us)
+# wc.crop <- crop(wc, vect_sf) %>%
+#   mask(., vect_sf)
+
+# set path to worldclim tifs
+wc_path <- "/Users/mikea/Documents/mikedata/cpm/202406/wc2"
+wc_files <- list.files(wc_path, pattern = "*.tif", full.names = T)
+
+# Read the GeoTIFF files into a raster stack
+raster_stack <- rast(wc_files)
+
+# Clip the raster stack
+# vect_sf <- vect(us)
+# wc <- crop(raster_stack, vect_sf) %>% 
+#   mask(., vect_sf)
+wc <- raster_stack
+plot(wc[[3]])
+
+plot(wc[[1]])
+
+lcpath <- "/Users/mikea/Documents/mikedata/cpm/202406/finaldata/"
+
+urban <- rast(paste0(lcpath, "conus_lc_urban_binary.tif")); names(urban) <- "urban"
+ag.cult <- rast(paste0(lcpath, "conus_lc_ag.cult_binary.tif")); names(ag.cult) <- "ag.cult"
+forest <- rast(paste0(lcpath, "conus_lc_forest_binary.tif")); names(forest) <- "forest"
+grass.ag <- rast(paste0(lcpath, "conus_lc_grass.ag_binary.tif")); names(grass.ag) <- "grass.ag"
+grass.nonag <- rast(paste0(lcpath, "conus_lc_grass.nonag_binary.tif")); names(grass.nonag) <- "grass.nonag"
+shrub <- rast(paste0(lcpath, "conus_lc_shrub_binary.tif")); names(shrub) <- "shrub"
+bare <- rast(paste0(lcpath, "conus_lc_bare_binary.tif")); names(bare) <- "bare"
+snow <- rast(paste0(lcpath, "conus_lc_snow_binary.tif")); names(snow) <- "snow"
+wet <- rast(paste0(lcpath, "conus_lc_wet_binary.tif")); names(wet) <- "wet"
+water <- rast(paste0(lcpath, "conus_lc_water_binary.tif")); names(water) <- "water"
+landcov <- c(urban, ag.cult, forest, grass.ag, grass.nonag, shrub, bare, snow, wet, water) 
+names(landcov)
+plot(landcov[[1]])         
+
+# get center points for all wc raster cells and make a 1500 m buffer around each one for area calcs
+
+# Get the coordinates of the center of each non-NA cell for the worldclim raster
+buffer_pts = terra::xyFromCell(wc[[1]], cells(wc[[1]])) %>%
+  as.data.frame() %>%
+  mutate(lon = x, lat = y) %>%
+  st_as_sf(., coords = c("x", "y"), crs = st_crs(wc)) %>%
+  # project to lc projection in meters
+  st_transform(crs = st_crs(landcov))
+
+buffers <- buffer_pts %>%
+  st_buffer(., dist = 1500)
+
+# extract land cover proportions 
+library(tictoc)
+for(i in 1:dim(landcov)[3]){ 
+  nm <- names(landcov)[i]
+  message(paste0("Processing ", i, " of ", dim(landcov)[3], ": ", nm))
+  tic()
+  vals <- exactextractr::exact_extract(landcov[[i]], buffers, fun = 'mean')
+  
+  landcov.p <- wc[[1]]
+  landcov.p[cells(landcov.p)] <- vals
+  writeRaster(landcov.p, paste0(lcpath, "conus_lc_", nm, "_p1500.tif"), overwrite = TRUE)
+  toc()
+}
+
+ # # make land cover raster
+lc.path <- "/Users/mikea/Documents/mikedata/cpm/202406/finaldata/"
+lc.files <- list.files(lc.path, pattern = "*p1500.tif", full.names = T)[grepl(list.files(lc.path, pattern = "*p1500.tif"), pattern = "conus_lc")]
+lc.files
+
+lc <- rast(lc.files)
+names(lc) <- c("ag.cult", "bare", "forest", "grass.ag", "grass.nonag", "shrub", "snow", "urban", "water", "wet")
+names(lc)
+plot(lc[[9]])
+
+env <- c(wc, lc)
+
+# load grasshopper point locations
 points <- g %>%
   dplyr::select(gbifID, lat, lon) %>%
-  st_as_sf(., coords = c("lon", "lat"))
+  st_as_sf(., coords = c("lon", "lat"), crs = 4326)
 
 # plot points
-plot(r[[1]], xlim = c(-120, -50), ylim = c(15, 50))
+plot(env[[1]], xlim = c(-120, -50), ylim = c(15, 50))
 plot(points, add = TRUE)
 
 # remove 3 observations that were extreme western outliers (at least one of which was a disputed ID)
 points <- g %>%
   filter(lon > -109) %>%
   dplyr::select(gbifID, lat, lon) %>%
-  st_as_sf(., coords = c("lon", "lat"))
+  st_as_sf(., coords = c("lon", "lat"), crs = 4326)
 
-# plot trimmed points
-plot(r[[1]], xlim = c(-120, -50), ylim = c(15, 50))
-plot(points, add = TRUE)
+# this creates a 400 km
+# that equates to about a 4-decimal-degree buffer per https://www.johndcook.com/how_big_is_a_degree.html
+# occurrence data
+occ_buff <- occ_final %>%
+  # st_transform(crs = sin) %>%
+  st_buffer(., dist = 400000) %>%
+  st_union() # %>%
+  # st_transform(st_crs(env))
 
-values <- terra::extract(r, points)
+# plot the first element ([[1]]) in the raster stack
+plot(env[[1]], xlim = c(-109, -50), ylim = c(15, 50))
 
-df <- cbind.data.frame(dplyr::select(filter(g, lon > -109), gbifID, lat, lon), values)
+plot(occ_buff, add = T, col = "blue")  # adds buffer polygon to the plot
+plot(occ_final, add = T, col = "red")  # adds occurrence data to the plot
 
+# crop study area to a manageable extent (rectangle shaped)
+studyArea <- terra::crop(env, ext(as(occ_buff, "Spatial")))  
+
+# the 'study area' created by extracting the buffer area from the raster stack
+studyArea <- mask(studyArea, vect(occ_buff))
+# output will still be a raster stack, just of the study area
+plot(studyArea[[1]])
+
+# save the new study area rasters as ascii
+writeRaster(studyArea,
+            # a series of names for output files
+            filename=paste0(
+              "/Users/mikea/Documents/mikedata/grasshopper/202407/env_final/",
+                            names(studyArea),".wclc.asc"), 
+            # format="ascii", ## the output format
+            # bylayer=TRUE, ## this will save a series of layers
+            overwrite=T)
+
+# select background points from this buffered area; when the number provided 
+# to set.seed() function, the same random sample will be selected in the next line			
+# use this code before the spatSample function every time, if you want to get
+# the same "random samples"
+set.seed(2); bg <- spatSample(x = studyArea,
+                 size = 10000,
+                 method = "random",
+                 as.points = TRUE,
+                 na.rm = TRUE) %>%
+  as(., "Spatial") %>%
+  st_as_sf(crs = 4326) %>%
+  mutate(gbifID = as.numeric(paste0(9999, 1:10000))) %>%
+  dplyr::select(gbifID)
+
+plot(studyArea[[1]])
+
+# add the background points to the plotted raster
+plot(bg,add=T) 
+# add the occurrence data to the plotted raster
+plot(occ_final, add=T, col="red")
+
+# make combined point dataset with observations and background points
+points.w.bg <- points %>%
+  bind_rows(bg) %>%
+  # project to lc projection in meters
+  st_transform(crs = st_crs(landcov))
+
+buffers.w.bg <- points.w.bg %>%
+  st_buffer(., dist = 1500)
+
+# get 1500 m land cover pct around each observation point
+vals <- exactextractr::exact_extract(landcov, buffers.w.bg, fun = 'mean')
+
+# get environmental values from observation points for modeling
+values <- terra::extract(env, st_transform(points.w.bg, crs = 4326))
+
+df <- cbind.data.frame(as.data.frame(points.w.bg), values[,2:20], vals) %>%
+  dplyr::select(-mean.snow) %>% # no snow
+  rename(ag.cult = mean.ag.cult, bare = mean.bare, forest = mean.forest, 
+         grass.ag = mean.grass.ag, grass.nonag = mean.grass.nonag,
+         shrub = mean.shrub, urban = mean.urban, water = mean.water,
+         wet = mean.wet)
 df
+
+write.csv(df, "output/train_dataset.csv", row.names = F)
 
 ```
 # Build maxent model using dismo
@@ -59,97 +211,67 @@ https://github.com/shandongfx/workshop_maxent_R/blob/master/code/Appendix1_case_
 Note: to make maxent work, I had to download a version of R that matched the build of Java that was installed. 
 ```{r}
 library(dismo)
-library(rJava)
+library(rJava) # note: need to install an x86_64 build of Java for this to work
+# brew install --cask temurin
+# R CMD javareconf
+# install.packages("rJava", type = "source")
+# Sys.setenv(JAVA_HOME = "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home")
+
+# export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+              # sudo -E R CMD javareconf
 maxent()
 
-points_sp <- as(points, "Spatial")
+train.points <- points.w.bg %>%
+ filter(!gbifID %in% paste0("9999",1:10000)) %>%
+  st_transform(crs = 4326)
+train.points_sp <- as(train.points, "Spatial")
+bg.train.points <- points.w.bg %>%
+  filter(gbifID %in% paste0("9999",1:10000)) %>%
+  st_transform(crs = 4326) %>%
+  as.data.frame() %>%
+  left_join(select(df, -geometry), by = "gbifID") %>%
+  dplyr::select(-gbifID, -geometry)
 
 # thin occ data (keep one occurrence point per cell)
-cells <- terra::cellFromXY(raster(r[[1]]), points_sp)
+cells <- terra::cellFromXY(raster(env[[1]]), train.points_sp)
 dups <- duplicated(cells)
-occ_final <- points_sp[!dups, ] %>%
-  st_as_sf(., crs = st_crs(clim))
-cat(nrow(points_sp) - nrow(occ_final), "records are removed")
-st_crs(occ_final) <- st_crs(clim)
+occ_final <- train.points_sp[!dups, ] %>%
+  st_as_sf(., crs = st_crs(env))
+cat(nrow(train.points_sp) - nrow(occ_final), "records are removed")
+st_crs(occ_final) <- st_crs(env)
 
-# plot the first climatic layer (or replace [[1]] with any
+# plot the first environmental layer (or replace [[1]] with any
 # nth number of the layer of interest from the raster stack).
-clim <- r; rm(r)
-plot(clim[[1]], xlim = c(-109, -50), ylim = c(15, 50))
+plot(env[[20]], xlim = c(-109, -50), ylim = c(15, 50))
 
 # plot the final occurrence data on the environmental layer
 plot(occ_final, add = T, col = "red")  # the 'add=T' tells R to put the incoming data on the existing layer
 
-# this creates a 400 km
-# that equates to about a 4-decimal-degree buffer per https://www.johndcook.com/how_big_is_a_degree.html
-# occurrence data
-occ_buff <- st_buffer(occ_final, dist = 400000) %>%
-  st_union()
-
-# plot the first element ([[1]]) in the raster stack
-plot(clim[[1]], xlim = c(-109, -50), ylim = c(15, 50))
-
-plot(occ_buff, add = T, col = "blue")  # adds buffer polygon to the plot
-plot(occ_final, add = T, col = "red")  # adds occurrence data to the plot
-
-# crop study area to a manageable extent (rectangle shaped)
-studyArea <- terra::crop(clim, ext(as(occ_buff, "Spatial")))  
-
-# the 'study area' created by extracting the buffer area from the raster stack
-studyArea <- mask(studyArea, vect(occ_buff))
-# output will still be a raster stack, just of the study area
-
-# save the new study area rasters as ascii
-writeRaster(studyArea,
-            # a series of names for output files
-            filename=paste0("../data/studyarea/",names(studyArea),".asc"), 
-            format="ascii", ## the output format
-            bylayer=TRUE, ## this will save a series of layers
-            overwrite=T)
-
-# select background points from this buffered area; when the number provided 
-# to set.seed() function, the same random sample will be selected in the next line			
-# use this code before the sampleRandom function every time, if you want to get
-# the same "random samples"
-set.seed(2) 
-bg <- sampleRandom(x=studyArea,
-                   size=1000,
-                   na.rm=T, #removes the 'Not Applicable' points  
-                   sp=T) # return spatial points 
-
-bg <- spatSample(x = studyArea,
-                 size = 1000,
-                 method = "random",
-                 as.points = TRUE,
-                 na.rm = TRUE) %>%
-  as(., "Spatial")
-
-plot(studyArea[[1]])
-# add the background points to the plotted raster
-plot(bg,add=T) 
-# add the occurrence data to the plotted raster
-plot(occ_final,add=T,col="red")
-
 # get the same random sample for training and testing
-set.seed(2)
 
 # randomly select 50% for training
-selected <- sample(1:nrow(occ_final), nrow(occ_final) * 0.75)
+set.seed(2); selected <- sample(1:nrow(occ_final), nrow(occ_final) * 0.5)
 
 occ_train <- occ_final[selected, ]  # this is the selection to be used for model training
 occ_test <- occ_final[-selected, ]  # this is the opposite of the selection which will be used for model testing
 
-# extracting env conditions for training occ from the raster
-# stack; a data frame is returned (i.e multiple columns)
-p <- extract(clim, occ_train)
+# env conditions for training occ from the raster
+p.env <- occ_train %>%
+  left_join(df, by = join_by(gbifID)) %>%
+  as.data.frame() %>%
+  dplyr::select(-gbifID,-geometry.x, -geometry.y) %>%
+  bind_rows(bg.train.points) %>%
+  dplyr::select(1:19)
+
 # env conditions for testing occ
-p_test <- extract(clim, occ_test)
-# extracting env conditions for background
-a <- extract(clim, vect(bg))
+p.env_test <-  occ_test %>%
+  left_join(df, by = join_by(gbifID)) %>%
+  as.data.frame() %>%
+  dplyr::select(-gbifID)
 
 # repeat the number 1 as many numbers as the number of rows
 # in p, and repeat 0 as the rows of background points
-pa <- c(rep(1, nrow(p)), rep(0, nrow(a)))
+pa <- c(rep(1, nrow(occ_train)), rep(0, nrow(bg.train.points)))
 
 # (rep(1,nrow(p)) creating the number of rows as the p data
 # set to have the number '1' as the indicator for presence;
@@ -159,16 +281,16 @@ pa <- c(rep(1, nrow(p)), rep(0, nrow(a)))
 # can be added to the Maxent table data frame with the
 # environmental attributes of the presence and absence
 # locations
-pder <- as.data.frame(rbind(p, a))
 
 # train Maxent with spatial data
 # mod <- maxent(x=clim,p=occ_train)
 
 # train Maxent with tabular data
-mod <- maxent(x=pder[2:20], ## env conditions
+mod <- maxent(x=p.env, ## env conditions minus snow
               p=pa,   ## 1:presence or 0:absence
 
-              path=paste0("./output/maxent_outputs"), ## folder for maxent output; 
+              path=paste0("./output/maxent_outputs_no_lc"), 
+              ## folder for maxent output; 
               # if we do not specify a folder R will put the results in a temp file, 
               # and it gets messy to read those. . .
               args=c("responsecurves") ## parameter specification
@@ -219,7 +341,9 @@ plot(occ_final, add = T)
 # future climate data
 https://www.worldclim.org/data/cmip6/cmip6_clim5m.html
 ```{r}
-
+# Download future climate scenario from 'ACCESS-ESM1-5' climate model.
+# Please note that you have to set download=T if you haven't downloaded the data before:
+clim_fut <- geodata::cmip6_world(model='ACCESS-ESM1-5', ssp='245', time='2061-2080', var='bioc', download=T, res=5, path="/Users/mikea/Documents/mikedata/grasshopper/202407/")
 
 
 ```
