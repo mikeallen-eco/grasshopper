@@ -2,6 +2,8 @@
 
 download worldclim (updated to use terra and sf)
 https://gis.stackexchange.com/questions/227585/using-r-to-extract-data-from-worldclim
+https://damariszurell.github.io/EEC-MGC/b2_EnvData.html
+https://groups.google.com/g/MAXENT/c/9NWuqaqbO10
 
 citation for grasshopper occurences:
 GBIF.org (27 July 2023) GBIF Occurrence Download  https://doi.org/10.15468/dl.dqxb4h
@@ -24,12 +26,12 @@ g <- read.csv("data/0118912-230530130749713.csv", sep = "\t") %>%
   filter(dup == FALSE) %>% 
   dplyr::select(-dupcheck, -dup)
 
-# load CONUS
-us <- rnaturalearth::ne_states(country = "United States of America", returnclass = "sf") %>%
-  filter(!name %in% c("Alaska", "Hawaii"))
-
-# test plot CONUS region
-plot(us[,"name"])
+# # load CONUS
+# us <- rnaturalearth::ne_states(country = "United States of America", returnclass = "sf") %>%
+#   filter(!name %in% c("Alaska", "Hawaii"))
+# 
+# # test plot CONUS region
+# plot(us[,"name"])
 
 # wc <- geodata::worldclim_global(var = "bio", res = 5, download=F, path="/Users/mikea/Documents/mikedata/grasshopper/202407/")
 # 
@@ -72,42 +74,43 @@ plot(landcov[[1]])
 
 # get center points for all wc raster cells and make a 1500 m buffer around each one for area calcs
 
-# Get the coordinates of the center of each non-NA cell for the worldclim raster
-buffer_pts = terra::xyFromCell(wc[[1]], cells(wc[[1]])) %>%
-  as.data.frame() %>%
-  mutate(lon = x, lat = y) %>%
-  st_as_sf(., coords = c("x", "y"), crs = st_crs(wc)) %>%
-  # project to lc projection in meters
-  st_transform(crs = st_crs(landcov))
-
-buffers <- buffer_pts %>%
-  st_buffer(., dist = 1500)
-
-# extract land cover proportions 
-library(tictoc)
-for(i in 1:dim(landcov)[3]){ 
-  nm <- names(landcov)[i]
-  message(paste0("Processing ", i, " of ", dim(landcov)[3], ": ", nm))
-  tic()
-  vals <- exactextractr::exact_extract(landcov[[i]], buffers, fun = 'mean')
-  
-  landcov.p <- wc[[1]]
-  landcov.p[cells(landcov.p)] <- vals
-  writeRaster(landcov.p, paste0(lcpath, "conus_lc_", nm, "_p1500.tif"), overwrite = TRUE)
-  toc()
-}
+# # Get the coordinates of the center of each non-NA cell for the worldclim raster
+# buffer_pts = terra::xyFromCell(wc[[1]], cells(wc[[1]])) %>%
+#   as.data.frame() %>%
+#   mutate(lon = x, lat = y) %>%
+#   st_as_sf(., coords = c("x", "y"), crs = st_crs(wc)) %>%
+#   # project to lc projection in meters
+#   st_transform(crs = st_crs(landcov))
+# 
+# buffers <- buffer_pts %>%
+#   st_buffer(., dist = 1500)
+# 
+# # extract land cover proportions 
+# library(tictoc)
+# for(i in 1:dim(landcov)[3]){ 
+#   nm <- names(landcov)[i]
+#   message(paste0("Processing ", i, " of ", dim(landcov)[3], ": ", nm))
+#   tic()
+#   vals <- exactextractr::exact_extract(landcov[[i]], buffers, fun = 'mean')
+#   
+#   landcov.p <- wc[[1]]
+#   landcov.p[cells(landcov.p)] <- vals
+#   writeRaster(landcov.p, paste0(lcpath, "conus_lc_", nm, "_p1500.tif"), overwrite = TRUE)
+#   toc()
+# }
 
  # # make land cover raster
-lc.path <- "/Users/mikea/Documents/mikedata/cpm/202406/finaldata/"
-lc.files <- list.files(lc.path, pattern = "*p1500.tif", full.names = T)[grepl(list.files(lc.path, pattern = "*p1500.tif"), pattern = "conus_lc")]
-lc.files
+# lc.path <- "/Users/mikea/Documents/mikedata/cpm/202406/finaldata/"
+# lc.files <- list.files(lc.path, pattern = "*p1500.tif", full.names = T)[grepl(list.files(lc.path, pattern = "*p1500.tif"), pattern = "conus_lc")]
+# lc.files
 
-lc <- rast(lc.files)
-names(lc) <- c("ag.cult", "bare", "forest", "grass.ag", "grass.nonag", "shrub", "snow", "urban", "water", "wet")
-names(lc)
-plot(lc[[9]])
+# lc <- rast(lc.files)
+# names(lc) <- c("ag.cult", "bare", "forest", "grass.ag", "grass.nonag", "shrub", "snow", "urban", "water", "wet")
+# names(lc)
+# plot(lc[[9]])
 
-env <- c(wc, lc)
+# env <- c(wc, lc)
+env <- wc
 
 # load grasshopper point locations
 points <- g %>%
@@ -127,11 +130,10 @@ points <- g %>%
 # this creates a 400 km
 # that equates to about a 4-decimal-degree buffer per https://www.johndcook.com/how_big_is_a_degree.html
 # occurrence data
-occ_buff <- occ_final %>%
+occ_buff <- points %>%
   # st_transform(crs = sin) %>%
   st_buffer(., dist = 400000) %>%
-  st_union() # %>%
-  # st_transform(st_crs(env))
+  st_union()
 
 # plot the first element ([[1]]) in the raster stack
 plot(env[[1]], xlim = c(-109, -50), ylim = c(15, 50))
@@ -182,26 +184,26 @@ plot(occ_final, add=T, col="red")
 points.w.bg <- points %>%
   bind_rows(bg) %>%
   # project to lc projection in meters
-  st_transform(crs = st_crs(landcov))
-
-buffers.w.bg <- points.w.bg %>%
-  st_buffer(., dist = 1500)
+  st_transform(crs = 4326)
+# 
+# buffers.w.bg <- points.w.bg %>%
+#   st_buffer(., dist = 1500)
 
 # get 1500 m land cover pct around each observation point
-vals <- exactextractr::exact_extract(landcov, buffers.w.bg, fun = 'mean')
+# vals <- exactextractr::exact_extract(landcov, buffers.w.bg, fun = 'mean')
 
 # get environmental values from observation points for modeling
 values <- terra::extract(env, st_transform(points.w.bg, crs = 4326))
 
-df <- cbind.data.frame(as.data.frame(points.w.bg), values[,2:20], vals) %>%
+df <- cbind.data.frame(as.data.frame(points.w.bg), values[,2:20])# %>%
   dplyr::select(-mean.snow) %>% # no snow
-  rename(ag.cult = mean.ag.cult, bare = mean.bare, forest = mean.forest, 
-         grass.ag = mean.grass.ag, grass.nonag = mean.grass.nonag,
-         shrub = mean.shrub, urban = mean.urban, water = mean.water,
-         wet = mean.wet)
+  # rename(ag.cult = mean.ag.cult, bare = mean.bare, forest = mean.forest, 
+  #        grass.ag = mean.grass.ag, grass.nonag = mean.grass.nonag,
+  #        shrub = mean.shrub, urban = mean.urban, water = mean.water,
+  #        wet = mean.wet)
 df
 
-write.csv(df, "output/train_dataset.csv", row.names = F)
+write.csv(df, "output/train_dataset_no_lc.csv", row.names = F)
 
 ```
 # Build maxent model using dismo
@@ -242,7 +244,7 @@ st_crs(occ_final) <- st_crs(env)
 
 # plot the first environmental layer (or replace [[1]] with any
 # nth number of the layer of interest from the raster stack).
-plot(env[[20]], xlim = c(-109, -50), ylim = c(15, 50))
+plot(env[[18]], xlim = c(-109, -50), ylim = c(15, 50))
 
 # plot the final occurrence data on the environmental layer
 plot(occ_final, add = T, col = "red")  # the 'add=T' tells R to put the incoming data on the existing layer
@@ -256,10 +258,12 @@ occ_train <- occ_final[selected, ]  # this is the selection to be used for model
 occ_test <- occ_final[-selected, ]  # this is the opposite of the selection which will be used for model testing
 
 # env conditions for training occ from the raster
-p.env <- occ_train %>%
+p.env.pres <- occ_train %>%
   left_join(df, by = join_by(gbifID)) %>%
   as.data.frame() %>%
-  dplyr::select(-gbifID,-geometry.x, -geometry.y) %>%
+  dplyr::select(-gbifID,-geometry.x, -geometry.y)
+
+p.env <- p.env.pres %>%
   bind_rows(bg.train.points) %>%
   dplyr::select(1:19)
 
@@ -308,11 +312,12 @@ mod@results
 ped1 <- predict(mod, studyArea)  # studyArea is the clipped rasters 
 plot(ped1)  # plot the continuous prediction
 
-# example 2, project to the world ped2 <- predict(mod,clim)
+# example 2, project to the world 
+# ped2 <- predict(mod,wc)
 # plot(ped2)
 
 # example 3, project with training occurrences [dataframes]
-ped3 <- predict(mod, p)
+ped3 <- predict(mod, p.env)
 head(ped3)
 
 hist(ped3)  # creates a histogram of the prediction
@@ -320,10 +325,10 @@ hist(ped3)  # creates a histogram of the prediction
 # using 'training data' to evaluate p & a are dataframe/s
 # (the p and a are the training presence and background
 # points)
-mod_eval_train <- dismo::evaluate(p = p, a = a, model = mod)
+mod_eval_train <- dismo::evaluate(p = p.env.pres, a = bg.train.points, model = mod)
 print(mod_eval_train)
 
-mod_eval_test <- dismo::evaluate(p = p_test, a = a, model = mod)
+mod_eval_test <- dismo::evaluate(p = p_test, a = bg.train.points, model = mod)
 print(mod_eval_test)  # training AUC may be higher than testing AUC
 
 # calculate thresholds of models
@@ -336,15 +341,46 @@ plot(ped1 >= thd1)
 # plot(ped1 >= thd2)
 plot(occ_final, add = T)
 
-
 ```
 # future climate data
 https://www.worldclim.org/data/cmip6/cmip6_clim5m.html
 ```{r}
 # Download future climate scenario from 'ACCESS-ESM1-5' climate model.
 # Please note that you have to set download=T if you haven't downloaded the data before:
-clim_fut <- geodata::cmip6_world(model='ACCESS-ESM1-5', ssp='245', time='2061-2080', var='bioc', download=T, res=5, path="/Users/mikea/Documents/mikedata/grasshopper/202407/")
+clim_fut <- geodata::cmip6_world(model='ACCESS-ESM1-5', ssp='245', time='2061-2080', var='bioc', download=F, res=2.5, path="/Users/mikea/Documents/mikedata/grasshopper/202407/")
 
+# the future 'study area' created by extracting the buffer area from the raster stack
+studyArea.future <- mask(clim_fut, vect(occ_buff)) %>%
+  crop(., vect(occ_buff))
+(namevect <- names(studyArea.future))
+names(studyArea)
+
+names(studyArea.future) <- paste0(substr(namevect,1,14), "_", substr(namevect,48,49))
+ped1.future <- predict(mod, studyArea.future)  # studyArea is the clipped rasters 
+
+plot(ped1)
+plot(ped1.future)  # plot the continuous prediction
+
+current_df <- as.data.frame(ped1, xy = TRUE)
+future_df <- as.data.frame(ped1.future, xy = TRUE)
+
+(cur <- ggplot(data = current_df) +
+  geom_raster(aes(x = x, y = y, fill = maxent)) + 
+  scale_fill_viridis_c(limits = c(0,1)) + 
+  theme_minimal() +
+  labs(x = "Longitude", y = "Latitude", fill = "", title = "Recent (1970-2000)") +
+  guides(fill = "none"))
+
+(fut <- ggplot(data = future_df) +
+  geom_raster(aes(x = x, y = y, fill = maxent)) + 
+  scale_fill_viridis_c(limits = c(0,1)) + 
+  theme_minimal() +
+  labs(x = "Longitude", y = "Latitude", fill = "", title = "Future (2061-2080)"))
+
+library(patchwork)
+cur + fut
+
+ggsave("figures/grasshopper_current_future.png", height = 4, width = 8, dpi = 600)
 
 ```
 
