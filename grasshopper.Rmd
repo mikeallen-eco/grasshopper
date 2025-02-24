@@ -609,4 +609,37 @@ modAUC <- read.csv("output/mod_AUC_grasshopper.csv")
 summary(modAUC$trainAUC[1:5])
 summary(modAUC$testAUC[1:5])
 ```
+# plot incursions
+```{r}
+
+ir <- g %>%
+  mutate(n.sightings = case_when(lat > 38 ~ 1,
+                                TRUE ~ 0),
+         n.state = case_when(stateProvince %in% c("New Jersey",
+                                                 "New York",
+                                                 "Pennsylvania") ~ 1,
+                            TRUE ~ 0)) %>%
+  group_by(year) %>%
+  summarize(n.sightings = sum(n.sightings),
+            n.state = sum(n.state),
+            n = length(year),
+            .groups = "drop") %>%
+  mutate(pct = 100*(n.sightings/n),
+         pct.state = 100*(n.state/n))
+
+ir %>%
+  filter(year > 1990,
+         n > 20) %>%
+ggplot() +
+  geom_line(aes(x = year, y = pct)) +
+  geom_point(aes(x = year, y = pct)) +
+  geom_text(aes(x = year, y = pct+1, label = n), color = "darkgray") +
+  scale_x_continuous(breaks = seq(2013, 2023, by = 2)) +
+  theme_bw() +
+  theme(text = element_text(size = 14)) +
+  labs(x = "", y = "% of sightings\nabove 38 N latitude")
+
+ggsave("figures/grasshopper_pct_sightings_above_38N.png", height = 4, width = 4, dpi = 600, bg = "white")
+
+```
 
