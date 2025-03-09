@@ -478,7 +478,9 @@ writeRaster(mean_pred.future, paste0(outpath, "grasshopper_present_5mod_avg.futu
 
 
 ```
-# plots
+
+
+# current & future plots (North America)
 ```{r}
 mean_pred <- terra::rast("/Users/mikea/Documents/mikedata/grasshopper/202502/grasshopper_present_5mod_avg.tif")
 studyArea <- terra::rast("/Users/mikea/Documents/mikedata/grasshopper/202502/studyArea.tif")
@@ -643,3 +645,179 @@ ggsave("figures/grasshopper_pct_sightings_above_38N.png", height = 4, width = 4,
 
 ```
 
+
+# predict present and future climate data (entire world)
+https://www.worldclim.org/data/cmip6/cmip6_clim5m.html
+```{r}
+
+# Download future climate scenario from 'ACCESS-ESM1-5' climate model.
+# Please note that you have to set download=T if you haven't downloaded the data before:
+clim_fut <- geodata::cmip6_world(model='ACCESS-ESM1-5', ssp='245', time='2061-2080', var='bioc', download=F, res=2.5, path="/Users/mikea/Documents/mikedata/grasshopper/202407/")
+
+# the future 'study area' created by extracting the buffer area from the raster stack
+studyArea.future <- clim_fut %>%
+  crop(., studyArea) %>%
+  mask(., studyArea)
+(namevect <- names(studyArea.future))
+names(studyArea)
+
+names(clim_fut) <- paste0(substr(namevect,1,14), "_", substr(namevect,48,49))
+
+ped1.world <- predict(mod1, raster::stack(wc))  
+ped2.world <- predict(mod2, raster::stack(wc))  
+ped3.world <- predict(mod3, raster::stack(wc))  
+ped4.world <- predict(mod4, raster::stack(wc))  
+ped5.world <- predict(mod5, raster::stack(wc))  
+ped1.world.future <- predict(mod1, raster::stack(clim_fut))  
+ped2.world.future <- predict(mod2, raster::stack(clim_fut))  
+ped3.world.future <- predict(mod3, raster::stack(clim_fut))  
+ped4.world.future <- predict(mod4, raster::stack(clim_fut))  
+ped5.world.future <- predict(mod5, raster::stack(clim_fut))  
+
+# combine individual model runs
+ped_all.world <- stack(ped1.world, ped2.world, 
+                        ped3.world, ped4.world, 
+                        ped5.world)
+ped_all.world.future <- stack(ped1.world.future, ped2.world.future, 
+                        ped3.world.future, ped4.world.future, 
+                        ped5.world.future)
+
+mean_pred.world <- mean(ped_all.world)
+mean_pred.world.future <- mean(ped_all.world.future)
+
+# write the raster to big data folder
+writeRaster(mean_pred.world, paste0(outpath, "grasshopper_present_5mod_avg.world.tif"), overwrite = T)
+
+writeRaster(mean_pred.world.future, paste0(outpath, "grasshopper_present_5mod_avg.world.future.tif"), overwrite = T)
+
+
+
+```
+
+
+# current & future plots (entire world)
+```{r}
+mean_pred.world <- terra::rast("/Users/mikea/Documents/mikedata/grasshopper/202502/grasshopper_present_5mod_avg.world.tif")
+
+mean_pred.world.future <- terra::rast("/Users/mikea/Documents/mikedata/grasshopper/202502/grasshopper_present_5mod_avg.world.future.tif")
+
+# us <- rnaturalearthhires::countries10
+world_highres <- rnaturalearth::ne_countries(scale = 10, returnclass = "sf")
+lakes <- rnaturalearth::ne_download(scale = 110, type = "lakes", category = "physical", returnclass = "sf")
+
+# Reproject vector data to Mollweide
+world_highres_moll <- st_transform(world_highres, crs = 'ESRI:54009')
+lakes_moll <- st_transform(lakes, crs = 'ESRI:54009')
+
+# get 90% distribution (world, future and current)
+mean_pred10pct.world.future <- mean_pred.world.future
+mean_pred10pct.world.future <- (mean_pred10pct.world.future > 0.375)
+
+mean_pred10pct.world <- mean_pred.world
+mean_pred10pct.world <- (mean_pred10pct.world > 0.375)*1
+
+# Reproject the rasters into Mollweide
+mean_pred10pct.world_moll <- 
+  terra::project(rast(mean_pred10pct.world), 
+                                            "ESRI:54009")
+mean_pred10pct.world.future_moll <- 
+  terra::project(rast(mean_pred10pct.world.future), 
+                                                   "ESRI:54009")
+mean_pred.world_moll <- 
+  terra::project(rast(mean_pred.world), 
+                                            "ESRI:54009")
+mean_pred.world.future_moll <- 
+  terra::project(rast(mean_pred.world.future), 
+                                                   "ESRI:54009")
+
+writeRaster(mean_pred10pct.world_moll, paste0(outpath, "grasshopper_present_5mod_avg_10pct.world_moll.tif"), overwrite = T)
+writeRaster(mean_pred10pct.world.future_moll, paste0(outpath, "grasshopper_present_5mod_avg_10pct.world.future_moll.tif"), overwrite = T)
+writeRaster(mean_pred.world_moll, paste0(outpath, "grasshopper_present_5mod_avg.world_moll.tif"), overwrite = T)
+writeRaster(mean_pred.world.future_moll, paste0(outpath, "grasshopper_present_5mod_avg.world.future_moll.tif"), overwrite = T)
+
+# make dataframe of current and future continous predictions for ggplot (world)
+current_df.world <- as.data.frame(mean_pred.world_moll, xy = TRUE) %>%
+  dplyr::rename(value = 3) %>%
+  filter(value > 0.375)
+future_df.world <- as.data.frame(mean_pred.world.future_moll, xy = TRUE) %>%
+  dplyr::rename(value = 3) %>%
+  filter(value > 0.375)
+
+# convert binary rasters to to dataframe for ggplot
+current_df.world.bin <- as.data.frame(mean_pred10pct.world_moll, 
+                                      xy = TRUE) %>%
+  dplyr::rename(value = 3) %>%
+  filter(value %in% 1)
+future_df.world.bin <- as.data.frame(mean_pred10pct.world.future_moll, 
+                                     xy = TRUE) %>%
+  dplyr::rename(value = 3) %>%
+  filter(value %in% 1)
+
+# plot continuous predictions (entire world), current and future
+# (cur <- ggplot(data = current_df.world) +
+#   geom_sf(data = world_highres_moll) +
+#   geom_tile(aes(x = x, y = y, fill = value)) +
+#   scale_fill_viridis_c(option = "inferno") +
+#   geom_sf(data = lakes_moll, fill = "steelblue") +
+#   # lims(x = c(-104, -68), y = c(20,50)) +
+#   coord_sf(crs = 'ESRI:54009') +  # Mollweide projection
+#   theme_minimal() +
+#   labs(x = "", y = "", fill = "") + # , title = "1970-2000"
+#   guides(fill = "none") +
+#     theme(axis.text = element_blank()))
+# 
+# (fut <- ggplot(data = future_df.world) +
+#   geom_sf(data = world_highres_moll) +
+#   geom_tile(aes(x = x, y = y, fill = value)) +
+#   scale_fill_viridis_c(option = "inferno") +
+#   geom_sf(data = lakes_moll, fill = "steelblue") +
+#   # lims(x = c(-104, -68), y = c(20,50)) +  
+#   coord_sf(crs = 'ESRI:54009') +  # Mollweide projection
+#   theme_minimal() +
+#   labs(x = "", y = "", fill = "") + # , title = "2061-2080"
+#   guides(fill = "none") +
+#     theme(axis.text = element_blank()))
+
+(both <- ggplot(data = future_df.world.bin) +
+  geom_sf(data = world_highres_moll, alpha = 0.5) +
+  geom_tile(aes(x = x, y = y), 
+            fill = "darkred",
+            alpha = 0.5) +
+  geom_tile(aes(x = x, y = y), 
+            fill = "blue", 
+            alpha = 0.5,
+            data = current_df.world.bin) +
+  geom_sf(data = lakes_moll, fill = "steelblue") +
+  # lims(y = c(-60, 60)) +
+  # lims(x = c(-104, -68), y = c(20,50)) +
+    lims(y = c(-6184829-500, 6927685+900000)) +
+  coord_sf(crs = 'ESRI:54009') +  # Mollweide projection
+  theme_minimal() +
+  labs(x = "", y = "") +
+  guides(fill = "none"))
+
+ggsave("figures/grasshopper_current_future_5mod_avg.world.bin3.png", height = 8, width = 8, dpi = 600, bg = "white")
+
+# library(patchwork)
+# both + cur/fut + plot_layout(widths = c(2.5, 1))
+# 
+# ggsave("figures/grasshopper_current_future_5mod_avg.world.bin.3panel.png", height = 8, width = 8, dpi = 600, bg = "white")
+
+# current range size
+(num_cells_1 <- sum(current_df.world.bin$value %in% 1))
+cur.bin.proj = terra::project(rast(mean_pred10pct.world), sin)
+cell_area <- prod(res(cur.bin.proj))
+# Calculate total area
+(area_1 <- num_cells_1 * cell_area / 1000000) # 7603502 km2
+
+# future range size
+(num_cells_1.fut <- sum(future_df.world.bin$value %in% 1))
+fut.bin.proj = terra::project(rast(mean_pred10pct.world.future), sin)
+cell_area.fut <- prod(res(fut.bin.proj))
+# Calculate total area
+(area_1.fut <- num_cells_1.fut * cell_area.fut / 1000000) # 9632759 km2
+
+# calculate % increase in suitable area
+(9632759 - 7603502) / 9632759
+# [1] 0.2106621 # 21% increase in area
+```
